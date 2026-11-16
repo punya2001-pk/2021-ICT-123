@@ -104,10 +104,6 @@ To visualize the global distribution of fold changes against statistical signifi
 
 *Figure 3: Volcano plot displaying $\log_2$ fold change (DHF vs. DF) against $-\log_{10}(\text{FDR})$. Dashed vertical lines mark $\vert{}\log_2\text{FC}\vert{} = 1$ and the horizontal dashed line marks $\text{FDR} = 0.05$. While individual probes remain below the genome-wide FDR threshold, strong nominal directional shifts appear in top candidates such as CCL25 ($\log_2\text{FC} = +0.89$) and EHD3 ($\log_2\text{FC} = +0.77$).*
 
-![Hierarchical Clustering Heatmap of Top 35 Genes](figures/04_top35_heatmap.png)
-
-*Figure 4: Row-standardized hierarchical clustering heatmap of the top 35 ranked transcripts across the 28 acute dengue samples. Co-expressed gene blocks separate upregulated transcripts (red) in DHF patients from downregulated transcripts (blue) enriched in uncomplicated DF patients.*
-
 ### 5.3 Supervised Machine Learning Classification (`caret` + `e1071` Radial SVM)
 
 Because complex clinical syndromes such as plasma leakage arise from coordinated multi-gene dysregulation rather than single-gene switches, we evaluated whether combining the **top 15 ranked probes** into a multivariate classifier could accurately separate **DHF** from **DF**. A **Support Vector Machine with a Radial Basis Function (RBF) kernel** (`method = "svmRadial"`) was trained using `caret` with feature centering and scaling inside each resample under **5-fold cross-validation repeated 5 times** (25 total validation folds; 140 out-of-fold predictions).
