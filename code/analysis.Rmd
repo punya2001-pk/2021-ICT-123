@@ -1,0 +1,243 @@
+---
+title: "Microarray Gene Expression Analysis and SVM Classification of Dengue Hemorrhagic Fever"
+author: "2021/ICT/123"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 6)
+dir.create("../data", showWarnings = FALSE)
+dir.create("../figures", showWarnings = FALSE)
+```
+
+## 1. Data Import & Preprocessing (NCBI GEO Microarray: GSE51808)
+
+We analyze human whole-blood microarray gene expression data from NCBI GEO (**GSE51808**) to compare uncomplicated **Dengue Fever (DF)** and severe **Dengue Hemorrhagic Fever (DHF)**.
+
+```{r load-packages}
+library(GEOquery)
+library(limma)
+library(hthgu133pluspm.db)
+library(AnnotationDbi)
+library(caret)
+library(e1071)
+library(pROC)
+library(pheatmap)
+library(tidyverse)
+```
+
+```{r import-clean}
+# Load the Series Matrix file from the local data/ directory
+matrix_file <- "../data/GSE51808_series_matrix.txt.gz"
+gse <- getGEO(filename = matrix_file, getGPL = FALSE)
+
+expr_raw <- exprs(gse)
+meta_raw <- pData(gse)
+
+# Search metadata columns to filter acute DF and DHF patient samples
+meta_text <- apply(meta_raw, 1, paste, collapse = " ")
+keep_samples <- grepl("\\bDF\\b|\\bDHF\\b|Dengue Fever|Dengue Hemorrhagic", meta_text, ignore.case = TRUE) &
+                !grepl("Convalescent|Healthy|Control", meta_text, ignore.case = TRUE)
+
+expr_clean <- expr_raw[, keep_samples]
+meta_clean <- meta_raw[keep_samples, ]
+meta_text_clean <- meta_text[keep_samples]
+
+# Create binary clinical class labels: DF vs DHF
+meta_clean$Condition <- ifelse(grepl("\\bDHF\\b|Hemorrhagic", meta_text_clean, ignore.case = TRUE), "DHF", "DF")
+meta_clean$Condition <- factor(meta_clean$Condition, levels = c("DF", "DHF"))
+
+print(table(meta_clean$Condition))
+```
+
+## 2. Quality Control & Microarray Intensity Distribution
+
+```{r qc-check}
+# Remove missing values (NA)
+expr_clean <- na.omit(expr_clean)
+
+# Verify log2-normalized microarray intensity range
+print(summary(as.vector(expr_clean)))
+
+# Save cleaned sample metadata
+write.csv(meta_clean[, c("geo_accession", "title", "Condition")], "../data/sample_metadata.csv", row.names = FALSE)
+
+# Boxplot of sample expression distributions
+expr_long <- as.data.frame(expr_clean) %>%
+  pivot_longer(everything(), names_to = "Sample", values_to = "Expression") %>%
+  left_join(meta_clean[, c("geo_accession", "Condition")], by = c("Sample" = "geo_accession"))
+
+p_box <- ggplot(expr_long, aes(x = Sample, y = Expression, fill = Condition)) +
+  geom_boxplot(outlier.size = 0.3, alpha = 0.8) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  labs(title = "Microarray Quality Control: Log2 Intensity Distribution Across Samples",
+       x = "Patient Samples", y = "Log2 Normalized Intensity")
+
+print(p_box)
+ggsave("../figures/01_qc_boxplot.png", p_box, width = 8, height = 5, dpi = 300)
+```
+
+## 3. Exploratory Data Analysis: Principal Component Analysis (PCA)
+
+```{r eda-pca}
+# Unsupervised dimensionality reduction using PCA
+pca_res <- prcomp(t(expr_clean), scale. = TRUE)
+var_explained <- round(100 * (pca_res$sdev^2 / sum(pca_res$sdev^2)), 1)
+
+pca_df <- data.frame(
+  PC1 = pca_res$x[, 1],
+  PC2 = pca_res$x[, 2],
+  Condition = meta_clean$Condition
+)
+
+p_pca <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Condition, shape = Condition)) +
+  geom_point(size = 3.5, alpha = 0.85) +
+  stat_ellipse(level = 0.68, linetype = "dashed") +
+  scale_color_manual(values = c("DF" = "#1b9e77", "DHF" = "#d95f02")) +
+  theme_minimal() +
+  labs(title = "PCA of Whole-Blood Microarray Profiles (DF vs. DHF)",
+       x = paste0("PC1 (", var_explained[1], "% Variance)"),
+       y = paste0("PC2 (", var_explained[2], "% Variance)"))
+
+print(p_pca)
+ggsave("../figures/02_pca_plot.png", p_pca, width = 7, height = 5, dpi = 300)
+```
+
+## 4. Differential Gene Expression Analysis (`limma`)
+
+```{r limma-deg}
+# Linear modeling and empirical Bayes moderation for microarray differential expression
+design <- model.matrix(~ 0 + meta_clean$Condition)
+colnames(design) <- c("DF", "DHF")
+
+fit <- lmFit(expr_clean, design)
+contrast_mat <- makeContrasts(DHF_vs_DF = DHF - DF, levels = design)
+fit2 <- eBayes(contrasts.fit(fit, contrast_mat))
+
+# Extract ranked gene list with Benjamini-Hochberg FDR multiple-testing correction
+deg_table <- topTable(fit2, coef = "DHF_vs_DF", number = Inf, adjust.method = "BH")
+deg_table$ProbeID <- rownames(deg_table)
+
+# Annotate microarray Probe IDs with official Human Gene Symbols
+deg_table$GeneSymbol <- mapIds(hthgu133pluspm.db,
+                               keys = deg_table$ProbeID,
+                               column = "SYMBOL",
+                               keytype = "PROBEID",
+                               multiVals = "first")
+
+# Classify significant biomarkers (FDR < 0.05 and |log2FC| > 1)
+deg_table$Status <- "Not Significant"
+deg_table$Status[deg_table$adj.P.Val < 0.05 & deg_table$logFC > 1]  <- "Upregulated in DHF"
+deg_table$Status[deg_table$adj.P.Val < 0.05 & deg_table$logFC < -1] <- "Downregulated in DHF"
+
+print(table(deg_table$Status))
+write.csv(deg_table, "../data/deg_results_full.csv", row.names = FALSE)
+
+# Table of Top 10 Differentially Expressed Genes
+top10_table <- deg_table %>%
+  filter(!is.na(GeneSymbol) & GeneSymbol != "") %>%
+  arrange(adj.P.Val) %>%
+  select(ProbeID, GeneSymbol, logFC, AveExpr, P.Value, adj.P.Val, Status) %>%
+  head(10)
+
+knitr::kable(top10_table, digits = 4, caption = "Top 10 Differentially Expressed Genes (DHF vs. DF)")
+```
+
+### 4.1 Volcano Plot & Hierarchical Clustering Heatmap
+
+```{r deg-plots}
+# Volcano Plot
+p_volcano <- ggplot(deg_table, aes(x = logFC, y = -log10(adj.P.Val), color = Status)) +
+  geom_point(alpha = 0.65, size = 1.6) +
+  scale_color_manual(values = c("Downregulated in DHF" = "#2b8cbe",
+                                "Not Significant" = "grey70",
+                                "Upregulated in DHF" = "#e34a33")) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  theme_minimal() +
+  labs(title = "Volcano Plot: Differential Gene Expression (DHF vs. DF)",
+       x = "Log2 Fold Change (DHF / DF)",
+       y = "-Log10 Adjusted P-Value (FDR)")
+
+print(p_volcano)
+ggsave("../figures/03_volcano_plot.png", p_volcano, width = 8, height = 6, dpi = 300)
+
+# Unsupervised Hierarchical Clustering of Top 35 Biomarker Genes
+top35_probes <- head(deg_table$ProbeID[order(deg_table$adj.P.Val)], 35)
+top35_labels <- deg_table$GeneSymbol[match(top35_probes, deg_table$ProbeID)]
+top35_labels <- ifelse(is.na(top35_labels) | top35_labels == "", top35_probes, top35_labels)
+
+heatmap_mat <- expr_clean[top35_probes, ]
+rownames(heatmap_mat) <- make.unique(top35_labels)
+
+col_annot <- data.frame(Condition = meta_clean$Condition)
+rownames(col_annot) <- colnames(heatmap_mat)
+
+pheatmap(heatmap_mat, scale = "row", annotation_col = col_annot,
+         show_colnames = FALSE, fontsize_row = 7,
+         main = "Hierarchical Clustering of Top 35 Differentially Expressed Genes")
+
+png("../figures/04_top35_heatmap.png", width = 2400, height = 2100, res = 300)
+pheatmap(heatmap_mat, scale = "row", annotation_col = col_annot,
+         show_colnames = FALSE, fontsize_row = 7,
+         main = "Hierarchical Clustering of Top 35 Differentially Expressed Genes")
+dev.off()
+```
+
+## 5. Supervised Classification: Support Vector Machine (`caret` + `e1071`)
+
+Using the top 15 differentially expressed genes as features, we train a **Support Vector Machine (SVM)** classifier with 5-fold cross-validation to classify patients into **DF** or **DHF**.
+
+```{r svm-classifier}
+top15_probes <- head(deg_table$ProbeID[order(deg_table$adj.P.Val)], 15)
+ml_df <- as.data.frame(t(expr_clean[top15_probes, ]))
+colnames(ml_df) <- make.names(colnames(ml_df))
+ml_df$Condition <- meta_clean$Condition
+
+set.seed(42)
+cv_ctrl <- trainControl(method = "repeatedcv",
+                        number = 5,
+                        repeats = 5,
+                        classProbs = TRUE,
+                        summaryFunction = twoClassSummary,
+                        savePredictions = "final")
+
+svm_fit <- train(Condition ~ .,
+                 data = ml_df,
+                 method = "svmRadial",
+                 metric = "ROC",
+                 preProcess = c("center", "scale"),
+                 trControl = cv_ctrl)
+
+print(svm_fit)
+
+# Evaluate Classification Performance with Confusion Matrix & ROC Curve
+cm <- confusionMatrix(svm_fit$pred$pred, svm_fit$pred$obs, positive = "DHF")
+print(cm$table)
+print(cm$overall["Accuracy"])
+
+roc_res <- roc(svm_fit$pred$obs, svm_fit$pred$DHF, quiet = TRUE)
+auc_val <- round(auc(roc_res), 3)
+print(paste("Cross-Validated SVM ROC-AUC:", auc_val))
+
+plot(roc_res, col = "#d95f02", lwd = 3,
+     main = paste0("5-Fold CV ROC Curve: SVM Classifier (AUC = ", auc_val, ")"))
+
+png("../figures/05_svm_roc_curve.png", width = 1800, height = 1600, res = 300)
+plot(roc_res, col = "#d95f02", lwd = 3,
+     main = paste0("5-Fold CV ROC Curve: SVM Classifier (AUC = ", auc_val, ")"))
+dev.off()
+```
+
+## 6. Session Information (Reproducibility)
+
+```{r session-info}
+sessionInfo()
+```
