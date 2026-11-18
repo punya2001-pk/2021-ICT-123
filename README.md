@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Executive Summary
+## 1. Abstract
 
 Dengue virus infection presents a broad clinical spectrum ranging from self-limiting, uncomplicated **Dengue Fever (DF)** to life-threatening **Dengue Hemorrhagic Fever (DHF)**, which is characterized by plasma leakage, thrombocytopenia, and hemorrhagic manifestations. Early differentiation between patients who will recover from mild DF and those who will progress to severe DHF remains a critical clinical challenge in endemic regions such as Sri Lanka, as severe vascular leakage typically emerges around the defervescence phase after initial febrile symptoms subside.
 
