@@ -159,20 +159,20 @@ When these 15 top-ranked transcripts are evaluated jointly inside a **Radial Bas
 
 ```text
 2021-ICT-123/
-├── README.md                                  # Complete scientific report & embedded figures
+├── README.md                                  
 ├── code/
-│   ├── analysis.Rmd                           # Reproducible R Markdown bioinformatics pipeline
-│   └── analysis.html                          # Knitted HTML report with full code & outputs
+│   ├── analysis.Rmd                           
+│   └── analysis.html                          
 ├── data/
-│   ├── GSE51808_series_matrix.txt.gz          # Cached NCBI GEO GSE51808 expression matrix
-│   ├── sample_metadata.csv                    # Cleaned clinical class labels (18 DF, 10 DHF)
-│   └── deg_results_full.csv                   # Full limma differential expression table (54,715 probes)
+│   ├── GSE51808_series_matrix.txt.gz          
+│   ├── sample_metadata.csv                    
+│   └── deg_results_full.csv                  
 └── figures/
-    ├── 01_qc_boxplot.png                      # Sample-wise log2 intensity QC boxplot
-    ├── 02_pca_plot.png                        # Unsupervised PCA scatter plot (DF vs. DHF)
-    ├── 03_volcano_plot.png                    # Differential expression volcano plot
-    ├── 04_top35_heatmap.png                   # Hierarchical clustering heatmap of top 35 genes
-    └── 05_svm_roc_curve.png                   # 5-fold repeated CV ROC curve for SVM classifier
+    ├── 01_qc_boxplot.png                      
+    ├── 02_pca_plot.png                       
+    ├── 03_volcano_plot.png                    
+    ├── 04_top35_heatmap.png                  
+    └── 05_svm_roc_curve.png                   
 ```
 
 ### 8.2 How to Reproduce This Analysis
